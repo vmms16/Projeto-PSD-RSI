@@ -36,17 +36,17 @@ void setup() {
   Serial.begin(9600);
   delay(500);
   wifi_set_opmode(STATION_MODE);
-  wifi_promiscuous_enable(1); 
+  wifi_promiscuous_enable(1);
+  wifipkt[10] = wifipkt[16] = 0x12;
+  wifipkt[11] = wifipkt[17] = 0x13;
+  wifipkt[12] = wifipkt[18] = 0x14;
+  wifipkt[13] = wifipkt[19] = 0x15;
+  wifipkt[14] = wifipkt[20] = 0x09;
+  wifipkt[15] = wifipkt[21] = 0x10;
+ 
 }
 
 void loop() {
-
-    wifipkt[10] = wifipkt[16] = random(256);
-    wifipkt[11] = wifipkt[17] = random(256);
-    wifipkt[12] = wifipkt[18] = random(256);
-    wifipkt[13] = wifipkt[19] = random(256);
-    wifipkt[14] = wifipkt[20] = random(256);
-    wifipkt[15] = wifipkt[21] = random(256);
 
     count=37;
 
