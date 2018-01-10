@@ -1,17 +1,44 @@
+
 extern "C" {
   #include <user_interface.h>
 }
 
 #define DATA_LENGTH           112
-
 #define TYPE_MANAGEMENT       0x00
 #define TYPE_CONTROL          0x01
 #define TYPE_DATA             0x02
 #define SUBTYPE_PROBE_REQUEST 0x04
 
+#define QTD_MACS 30
+
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+
+/////////////////BEACON///////////////////////
+
+byte channel;
+byte rnd;
+byte i;
+byte count;
+int maxssids = 1;  /*Quantidade de SSIDS*/
+char *ssids[] = {  "Macaco" };
+
+byte wifipkt[128] = {   0x80, 0x00, 0x00, 0x00, 
+                /*4*/   0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
+                /*10*/  0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+                /*16*/  0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 
+                /*22*/  0xc0, 0x6c, 
+                /*24*/  0x83, 0x51, 0xf7, 0x8f, 0x0f, 0x00, 0x00, 0x00, 
+                /*32*/  0x64, 0x00, 
+                /*34*/  0x01, 0x04, 
+                /* SSID */
+                /*36*/  0x00};
+
+byte pktsuffix[] = {    0x01, 0x08, 0x82, 0x84,
+                        0x8b, 0x96, 0x24, 0x30, 0x48, 0x6c, 0x03, 0x01, 
+                        0x04 };   
+/////////////////BEACON///////////////////////
 
 WiFiClient espClient;
 
@@ -60,6 +87,13 @@ typedef struct SnifferPacket{
 } SnifferPacketT;
 
 SnifferPacketT* snifferP = NULL; ///GLOBAL     ///MODIFIED
+char addr[] = "00:00:00:00:00:00";
+
+String rssids[QTD_MACS];                              ////rssids
+
+int contadorMac = 0;
+char macs[QTD_MACS][18];                              /////MACS
+
 
 static void showMetadata(SnifferPacketT *snifferPacket) {
 
@@ -79,13 +113,23 @@ static void showMetadata(SnifferPacketT *snifferPacket) {
   Serial.print("RSSI: ");
   Serial.print(snifferPacket->rx_ctrl.rssi, DEC);
 
+  rssids[contadorMac] = String(snifferPacket->rx_ctrl.rssi, DEC);
+
   Serial.print(" Ch: ");
   Serial.print(wifi_get_channel());
 
-  char addr[] = "00:00:00:00:00:00";
+
   getMAC(addr, snifferPacket->data, 10);
   Serial.print(" Peer MAC: ");
   Serial.print(addr);
+  for(int i = 0; i < 18; i++){
+      macs[contadorMac][i] = addr[i];
+  }
+  contadorMac++;
+  if(contadorMac == QTD_MACS){
+      contadorMac = 0;
+      Serial.print("Contador de Macs ZERADO!!!");
+  }
 
   uint8_t SSID_length = snifferPacket->data[25];
   Serial.print(" SSID: ");
@@ -124,8 +168,6 @@ static os_timer_t channelHop_timer;
 #define ENABLE  1
 
  void timer2(){
-//  /Serial.println("Alguma coisa");
-//  Ser/ial.println(contador);
   if(contador > 2){
     Serial.println("Disarmando...");
     os_timer_disarm(&channelHop_timer);
@@ -136,7 +178,17 @@ static os_timer_t channelHop_timer;
     
     if (!client.connected()) {
         conectMqtt();
-        sendMessage("boaa");
+        for(int i = 0; i < QTD_MACS; i++){
+            if(macs[i][0] == '*'){
+              break;
+            }
+            
+            sendMessage("macaco_00", macs[i], rssids[i]);
+        }
+        contadorMac = 0;
+        for(int i = 0; i < QTD_MACS; i++){
+            macs[i][0] = '*';
+        }
     }
         
     wifi_promiscuous_enable(ENABLE);
@@ -195,12 +247,9 @@ void conectMqtt() {
 }
 
 
-void sendMessage(String m){
+void sendMessage(String idRecinto, String mac, String potencia){
 
-  char addr[] = "00:00:00:00:00:00";
-  getMAC(addr, snifferP->data, 10);
-
-  String mensagem = "{'mac':" + m +"}";
+  String mensagem = "{'idRecinto': " + idRecinto + ", 'mac': " + mac +", 'potencia': " + potencia + "}";
 
   // Transformando a String em char para poder publicar no mqtt
   char charpub[mensagem.length() + 1];
@@ -214,11 +263,25 @@ void sendMessage(String m){
 /////////////////////////////////////////////
 
 void setup() {
+
+  for(int i = 0; i < QTD_MACS; i++)
+    macs[i][0] = '*';
+
+  
   // set the WiFi chip to "promiscuous" mode aka monitor mode
   Serial.begin(115200);
-  delay(10);
+  delay(30);
+  /////////////////BEACON///////////////////////
   wifi_set_opmode(STATION_MODE);
-  wifi_set_channel(1);
+  wifi_promiscuous_enable(1);
+  wifipkt[10] = wifipkt[16] = 0x12;
+  wifipkt[11] = wifipkt[17] = 0x13;
+  wifipkt[12] = wifipkt[18] = 0x14;
+  wifipkt[13] = wifipkt[19] = 0x15;
+  wifipkt[14] = wifipkt[20] = 0x09;
+  wifipkt[15] = wifipkt[21] = 0x10;
+  /////////////////BEACON///////////////////////
+
   wifi_promiscuous_enable(DISABLE);
   delay(10);
   wifi_set_promiscuous_rx_cb(sniffer_callback);
@@ -234,6 +297,25 @@ void setup() {
 }
 
 void loop() {
-  delay(10);
-  timer2();
+  /////////////////BEACON///////////////////////
+    count=37;
+
+    rnd=random(maxssids);
+    
+    wifipkt[count++]=strlen(ssids[rnd]);
+    for (i=0; i<strlen(ssids[rnd]); i++) {
+      wifipkt[count++]=ssids[rnd][i];
+    }
+    
+    for (i=0; i<sizeof(pktsuffix); i++) {
+       wifipkt[count++]=pktsuffix[i];
+    }
+
+    wifi_set_channel(1);
+    wifipkt[count-1] = 1;
+    wifi_send_pkt_freedom(wifipkt, count, 0);
+  /////////////////BEACON///////////////////////
+    
+    delay(10);
+    timer2();
 }
